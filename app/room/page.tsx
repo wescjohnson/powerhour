@@ -15,10 +15,26 @@ interface Track {
 
 interface QueuedTrack extends Track {
   chorusMs?: number
-  addedBy?: string
+  analysisReady?: boolean
 }
 
-type RoomPhase = 'waiting' | 'playing' | 'between'
+type RoomPhase = 'waiting' | 'analyzing' | 'playing' | 'between'
+
+async function fetchChorusPosition(trackId: string, durationMs: number): Promise<number> {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 8000)
+    const res = await fetch(`/api/analysis/${trackId}`, { signal: controller.signal })
+    clearTimeout(timeout)
+    if (!res.ok) throw new Error('Analysis failed')
+    const data = await res.json()
+    const positionMs = data.chorus?.positionMs
+    if (typeof positionMs === 'number' && positionMs > 0) return positionMs
+    return Math.floor(durationMs * 0.25)
+  } catch {
+    return Math.floor(durationMs * 0.25)
+  }
+}
 
 export default function RoomPage() {
   const [user, setUser] = useState<{ displayName: string; accessToken: string } | null>(null)
@@ -36,8 +52,11 @@ export default function RoomPage() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const roundStartRef = useRef<number>(0)
   const startNextRoundRef = useRef<(() => Promise<void>) | null>(null)
+  const queueRef = useRef<QueuedTrack[]>([])
 
   const { state: playerState, play, pause } = useSpotifyPlayer(user?.accessToken ?? null)
+
+  useEffect(() => { queueRef.current = queue }, [queue])
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -52,28 +71,20 @@ export default function RoomPage() {
       })
   }, [])
 
-  const startNextRound = useCallback(async (currentQueue?: QueuedTrack[]) => {
-    const q = currentQueue ?? queue
-    if (q.length === 0) return
+  const startNextRound = useCallback(async () => {
+    const q = queueRef.current
+    if (q.length === 0) { setPhase('waiting'); setCurrentTrack(null); return }
 
     const next = q[0]
-    const remaining = q.slice(1)
-    setQueue(remaining)
+    setQueue(prev => prev.slice(1))
     setCurrentTrack(next)
-    setPhase('playing')
     setRoundNumber(n => n + 1)
 
-    let chorusMs = next.chorusMs ?? 0
-    if (!next.chorusMs) {
-      try {
-        const res = await fetch(`/api/analysis/${next.id}`)
-        const data = await res.json()
-        chorusMs = data.chorus?.positionMs ?? 0
-      } catch {
-        chorusMs = Math.floor(next.duration_ms * 0.25)
-      }
-    }
+    // Always await chorus before playing — show "analyzing" while waiting
+    setPhase('analyzing')
+    const chorusMs = next.chorusMs ?? await fetchChorusPosition(next.id, next.duration_ms)
 
+    setPhase('playing')
     await play(next.uri, chorusMs)
 
     roundStartRef.current = Date.now()
@@ -83,21 +94,35 @@ export default function RoomPage() {
       const elapsed = (Date.now() - roundStartRef.current) / 1000
       const left = Math.max(0, 60 - elapsed)
       setTimeLeft(Math.ceil(left))
-
       if (left <= 0) {
         clearInterval(timerRef.current!)
         pause()
         setPhase('between')
-        setTimeout(() => {
-          if (startNextRoundRef.current) startNextRoundRef.current()
-        }, 3000)
+        setTimeout(() => { if (startNextRoundRef.current) startNextRoundRef.current() }, 2000)
       }
     }, 250)
-  }, [queue, play, pause])
+  }, [play, pause])
 
-  useEffect(() => {
-    startNextRoundRef.current = startNextRound
-  }, [startNextRound])
+  useEffect(() => { startNextRoundRef.current = startNextRound }, [startNextRound])
+
+  const addToQueue = async (track: Track) => {
+    const queued: QueuedTrack = { ...track, analysisReady: false }
+    setQueue(prev => [...prev, queued])
+    setSearchOpen(false)
+    setSearchQuery('')
+    fetchChorusPosition(track.id, track.duration_ms).then(chorusMs => {
+      setQueue(prev => prev.map(t =>
+        t.id === track.id && !t.analysisReady ? { ...t, chorusMs, analysisReady: true } : t
+      ))
+    })
+  }
+
+  const skipSong = () => {
+    if (timerRef.current) clearInterval(timerRef.current)
+    pause()
+    setPhase('between')
+    setTimeout(() => startNextRound(), 500)
+  }
 
   useEffect(() => {
     if (!searchQuery.trim() || !user) { setSearchResults([]); return }
@@ -111,26 +136,6 @@ export default function RoomPage() {
     }, 400)
     return () => clearTimeout(timeout)
   }, [searchQuery, user])
-
-  const addToQueue = async (track: Track) => {
-    const queued: QueuedTrack = { ...track, addedBy: user?.displayName }
-    setQueue(prev => [...prev, queued])
-    setSearchOpen(false)
-    setSearchQuery('')
-    fetch(`/api/analysis/${track.id}`)
-      .then(r => r.json())
-      .then(data => {
-        setQueue(prev => prev.map(t => t.id === track.id ? { ...t, chorusMs: data.chorus?.positionMs } : t))
-      })
-      .catch(() => {})
-  }
-
-  const skipSong = () => {
-    if (timerRef.current) clearInterval(timerRef.current)
-    pause()
-    setPhase('between')
-    setTimeout(() => startNextRound(), 1000)
-  }
 
   if (loading) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
@@ -153,6 +158,7 @@ export default function RoomPage() {
               <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>LIVE</span>
             </div>
           )}
+          {phase === 'analyzing' && <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>Finding chorus...</span>}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Round <span style={{ color: 'var(--green)' }}>{roundNumber}</span></span>
@@ -171,9 +177,11 @@ export default function RoomPage() {
             </svg>
             <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
               <span style={{ fontFamily: 'var(--font-display)', fontSize: '52px', lineHeight: 1, color: timeLeft <= 10 ? '#ff4444' : '#fff', transition: 'color 0.3s ease' }}>
-                {phase === 'playing' ? timeLeft : '60'}
+                {phase === 'playing' ? timeLeft : phase === 'analyzing' ? '~' : '60'}
               </span>
-              <span style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.1em' }}>SECONDS</span>
+              <span style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.1em' }}>
+                {phase === 'analyzing' ? 'FINDING CHORUS' : 'SECONDS'}
+              </span>
             </div>
           </div>
 
@@ -181,7 +189,7 @@ export default function RoomPage() {
             <div style={{ textAlign: 'center', maxWidth: '380px' }}>
               {currentTrack.album.images[0] && (
                 <img src={currentTrack.album.images[0].url} alt={currentTrack.album.name}
-                  style={{ width: '120px', height: '120px', borderRadius: '8px', marginBottom: '1.25rem', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} />
+                  style={{ width: '120px', height: '120px', borderRadius: '8px', marginBottom: '1.25rem', boxShadow: '0 8px 32px rgba(0,0,0,0.5)', opacity: phase === 'analyzing' ? 0.6 : 1, transition: 'opacity 0.3s ease' }} />
               )}
               <div style={{ fontFamily: 'var(--font-display)', fontSize: '28px', color: '#fff', marginBottom: '4px' }}>{currentTrack.name}</div>
               <div style={{ color: 'var(--text-mid)', fontSize: '13px', marginBottom: '1.5rem' }}>{currentTrack.artists.map(a => a.name).join(', ')}</div>
@@ -200,7 +208,7 @@ export default function RoomPage() {
           )}
 
           {phase === 'waiting' && queue.length > 0 && (
-            <button onClick={() => startNextRound(queue)}
+            <button onClick={startNextRound}
               style={{ marginTop: '2rem', background: 'var(--green)', color: '#000', border: 'none', padding: '14px 40px', borderRadius: '40px', fontFamily: 'var(--font-mono)', fontWeight: 500, fontSize: '14px', cursor: 'pointer', letterSpacing: '0.05em' }}>
               Start Power Hour 🍺
             </button>
@@ -225,7 +233,6 @@ export default function RoomPage() {
                 style={{ width: '100%', background: 'var(--mid)', border: '1px solid var(--border)', borderRadius: '8px', padding: '10px 14px', color: 'var(--text)', fontFamily: 'var(--font-mono)', fontSize: '13px', outline: 'none' }} />
               {searching && <div style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: '11px' }}>...</div>}
             </div>
-
             {searchOpen && searchResults.length > 0 && (
               <div style={{ marginTop: '8px', background: 'var(--dark)', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden', maxHeight: '280px', overflowY: 'auto' }}>
                 {searchResults.map(track => (
@@ -260,7 +267,10 @@ export default function RoomPage() {
                   <div style={{ color: 'var(--text)', fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.name}</div>
                   <div style={{ color: 'var(--text-muted)', fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artists.map(a => a.name).join(', ')}</div>
                 </div>
-                {track.chorusMs !== undefined && <span title="Chorus detected" style={{ fontSize: '14px', flexShrink: 0 }}>🎯</span>}
+                {track.analysisReady
+                  ? <span title="Chorus ready" style={{ fontSize: '12px', flexShrink: 0 }}>🎯</span>
+                  : <span title="Analyzing..." style={{ fontSize: '12px', flexShrink: 0, opacity: 0.4 }}>⏳</span>
+                }
                 <button onClick={() => setQueue(prev => prev.filter((_, idx) => idx !== i))}
                   style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '16px', flexShrink: 0, padding: '0 4px' }}>×</button>
               </div>

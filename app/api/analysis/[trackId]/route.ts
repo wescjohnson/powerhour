@@ -28,15 +28,21 @@ export async function GET(
   try {
     const analysis = await getAudioAnalysis(session.accessToken, trackId)
     const totalDuration = analysis.track.duration
-    const chorus = detectChorus(analysis.sections, totalDuration)
-    const candidates = getChorusCandidates(analysis.sections, totalDuration)
+    const sections = analysis.sections
+
+    console.log(`[Analysis] Track ${trackId}: duration=${totalDuration}s, sections=${sections?.length}`)
+
+    const chorus = detectChorus(sections, totalDuration)
+    const candidates = getChorusCandidates(sections, totalDuration)
+
+    console.log(`[Analysis] Chorus result: positionMs=${chorus.positionMs}, confidence=${chorus.confidence}, reasoning=${chorus.reasoning}`)
 
     return NextResponse.json({
       trackId,
       duration: totalDuration,
       chorus,
       candidates,
-      sections: analysis.sections.map((s: any) => ({
+      sections: sections.map((s: any) => ({
         start: s.start,
         duration: s.duration,
         loudness: s.loudness,
@@ -44,7 +50,7 @@ export async function GET(
       })),
     })
   } catch (err) {
-    console.error('Analysis error:', err)
+    console.error('[Analysis] Error:', err)
     return NextResponse.json({ error: 'Analysis failed' }, { status: 500 })
   }
 }

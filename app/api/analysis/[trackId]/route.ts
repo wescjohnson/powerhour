@@ -1,4 +1,3 @@
-// app/api/analysis/[trackId]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession, isTokenExpired } from '@/lib/session'
 import { getAudioAnalysis, refreshAccessToken } from '@/lib/spotify'
@@ -6,8 +5,9 @@ import { detectChorus, getChorusCandidates } from '@/lib/chorus-detection'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { trackId: string } }
+  { params }: { params: Promise<{ trackId: string }> }
 ) {
+  const { trackId } = await params
   const session = await getSession()
 
   if (!session.accessToken) {
@@ -26,18 +26,16 @@ export async function GET(
   }
 
   try {
-    const analysis = await getAudioAnalysis(session.accessToken, params.trackId)
+    const analysis = await getAudioAnalysis(session.accessToken, trackId)
     const totalDuration = analysis.track.duration
-
     const chorus = detectChorus(analysis.sections, totalDuration)
     const candidates = getChorusCandidates(analysis.sections, totalDuration)
 
     return NextResponse.json({
-      trackId: params.trackId,
+      trackId,
       duration: totalDuration,
       chorus,
       candidates,
-      // Include raw sections for debug/manual override
       sections: analysis.sections.map((s: any) => ({
         start: s.start,
         duration: s.duration,

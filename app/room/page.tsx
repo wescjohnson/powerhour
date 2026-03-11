@@ -21,19 +21,9 @@ interface QueuedTrack extends Track {
 type RoomPhase = 'waiting' | 'analyzing' | 'playing' | 'between'
 
 async function fetchChorusPosition(trackId: string, durationMs: number): Promise<number> {
-  try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 8000)
-    const res = await fetch(`/api/analysis/${trackId}`, { signal: controller.signal })
-    clearTimeout(timeout)
-    if (!res.ok) throw new Error('Analysis failed')
-    const data = await res.json()
-    const positionMs = data.chorus?.positionMs
-    if (typeof positionMs === 'number' && positionMs > 0) return positionMs
-    return Math.floor(durationMs * 0.25)
-  } catch {
-    return Math.floor(durationMs * 0.25)
-  }
+  // Use 40% into the track — reliably lands on or near the chorus
+  // for most pop, rock, and hip-hop songs
+  return Math.floor(durationMs * 0.40)
 }
 
 export default function RoomPage() {

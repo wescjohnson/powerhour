@@ -1,67 +1,62 @@
-const startNextRound = useCallback(async () => {
-    let q = queueRef.current
+import { NextResponse } from 'next/server'
+import { getSession, isTokenExpired } from '@/lib/session'
+import { refreshAccessToken } from '@/lib/spotify'
 
-    // Queue is empty — pull from liked songs
-    if (q.length === 0) {
-      setPhase('analyzing')
-      try {
-        const res = await fetch('/api/player/liked')
-        const data = await res.json()
-        if (data.tracks && data.tracks.length > 0) {
-          // Take 10 songs from liked songs and add to queue
-          const refill = data.tracks.slice(0, 10).map((t: any) => ({
-            ...t,
-            analysisReady: false,
-          }))
-          setQueue(refill)
-          queueRef.current = refill
-          q = refill
+export async function GET() {
+  const session = await getSession()
 
-          // Pre-fetch chorus for all refilled songs in background
-          refill.forEach((track: any) => {
-            fetchChorusPosition(track.id, track.duration_ms).then(chorusMs => {
-              setQueue(prev => prev.map(t =>
-                t.id === track.id && !t.analysisReady
-                  ? { ...t, chorusMs, analysisReady: true }
-                  : t
-              ))
-            })
-          })
-        } else {
-          setPhase('waiting')
-          setCurrentTrack(null)
-          return
-        }
-      } catch {
-        setPhase('waiting')
-        setCurrentTrack(null)
-        return
-      }
+  if (!session.accessToken) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  }
+
+  if (await isTokenExpired(session)) {
+    try {
+      const refreshed = await refreshAccessToken(session.refreshToken!)
+      session.accessToken = refreshed.accessToken
+      session.expiresAt = refreshed.expiresAt
+      await session.save()
+    } catch {
+      return NextResponse.json({ error: 'Token expired' }, { status: 401 })
+    }
+  }
+
+  try {
+    const totalRes = await fetch('https://api.spotify.com/v1/me/tracks?limit=1', {
+      headers: { Authorization: `Bearer ${session.accessToken}` }
+    })
+    const totalData = await totalRes.json()
+    const total = totalData.total ?? 50
+    const maxOffset = Math.max(0, total - 50)
+    const offset = Math.floor(Math.random() * maxOffset)
+
+    const res = await fetch(
+      `https://api.spotify.com/v1/me/tracks?limit=50&offset=${offset}`,
+      { headers: { Authorization: `Bearer ${session.accessToken}` } }
+    )
+
+    if (!res.ok) throw new Error('Failed to fetch liked songs')
+    const data = await res.json()
+
+    const tracks = data.items
+      .map((item: any) => item.track)
+      .filter((t: any) => t && t.id && t.uri)
+      .map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        uri: t.uri,
+        duration_ms: t.duration_ms,
+        artists: t.artists,
+        album: t.album,
+      }))
+
+    for (let i = tracks.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [tracks[i], tracks[j]] = [tracks[j], tracks[i]]
     }
 
-    const next = q[0]
-    setQueue(prev => prev.slice(1))
-    setCurrentTrack(next)
-    setRoundNumber(n => n + 1)
-
-    setPhase('analyzing')
-    const chorusMs = next.chorusMs ?? await fetchChorusPosition(next.id, next.duration_ms)
-
-    setPhase('playing')
-    await play(next.uri, chorusMs)
-
-    roundStartRef.current = Date.now()
-    setTimeLeft(60)
-    if (timerRef.current) clearInterval(timerRef.current)
-    timerRef.current = setInterval(() => {
-      const elapsed = (Date.now() - roundStartRef.current) / 1000
-      const left = Math.max(0, 60 - elapsed)
-      setTimeLeft(Math.ceil(left))
-      if (left <= 0) {
-        clearInterval(timerRef.current!)
-        pause()
-        setPhase('between')
-        setTimeout(() => { if (startNextRoundRef.current) startNextRoundRef.current() }, 2000)
-      }
-    }, 250)
-  }, [play, pause])
+    return NextResponse.json({ tracks })
+  } catch (err) {
+    console.error('Liked songs error:', err)
+    return NextResponse.json({ error: 'Failed to fetch liked songs' }, { status: 500 })
+  }
+}

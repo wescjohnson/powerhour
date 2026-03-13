@@ -44,7 +44,7 @@ export default function RoomPage() {
   const [phase, setPhase] = useState<RoomPhase>('waiting')
   const [timeLeft, setTimeLeft] = useState(60)
   const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<Track[]>([])
+  const [searchResults, setSearchResults] = useState<any[]>([])
   const [searching, setSearching] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [mobileTab, setMobileTab] = useState<MobileTab>('player')
@@ -86,7 +86,6 @@ export default function RoomPage() {
     } catch {}
   }
 
-  // Sync state to room API so guests can see it
   const syncRoomState = useCallback(async (roomId: string, q: QueuedTrack[], ct: QueuedTrack | null, ph: RoomPhase, tl: number) => {
     try {
       await fetch(`/api/room/queue?roomId=${roomId}`, {
@@ -97,14 +96,12 @@ export default function RoomPage() {
     } catch {}
   }, [])
 
-  // Poll for guest-added songs every 3 seconds
   useEffect(() => {
     if (!user?.roomId) return
     const poll = async () => {
       try {
         const res = await fetch(`/api/room/queue?roomId=${user.roomId}`)
         const data = await res.json()
-        // Merge guest additions into our queue (avoid dupes)
         if (data.queue && data.queue.length > 0) {
           setQueue(prev => {
             const existingIds = new Set(prev.map((t: any) => t.id))
@@ -119,7 +116,6 @@ export default function RoomPage() {
     return () => { if (syncIntervalRef.current) clearInterval(syncIntervalRef.current) }
   }, [user?.roomId])
 
-  // Push current state to room API whenever it changes
   useEffect(() => {
     if (!user?.roomId) return
     syncRoomState(user.roomId, queue, currentTrack, phase, timeLeft)
@@ -186,12 +182,13 @@ export default function RoomPage() {
 
   useEffect(() => { startNextRoundRef.current = startNextRound }, [startNextRound])
 
-  const addToQueue = async (track: Track) => {
+  const addToQueue = (track: Track) => {
     const chorusMs = Math.floor(track.duration_ms * 0.40)
     const queued: QueuedTrack = { ...track, chorusMs, analysisReady: true }
     setQueue(prev => [...prev, queued])
-    setSearchOpen(false)
     setSearchQuery('')
+    setSearchResults([])
+    setSearchOpen(false)
     setMobileTab('queue')
   }
 
@@ -209,7 +206,10 @@ export default function RoomPage() {
       try {
         const res = await fetch(`/api/player/search?q=${encodeURIComponent(searchQuery)}`)
         const data = await res.json()
-        setSearchResults(data.tracks?.items ?? [])
+        setSearchResults([
+          ...(data.playlists?.items ?? []),
+          ...(data.tracks?.items ?? []),
+        ])
       } finally { setSearching(false) }
     }, 400)
     return () => clearTimeout(timeout)
@@ -256,7 +256,7 @@ export default function RoomPage() {
         <div style={{ color: '#666', fontSize: '12px', marginBottom: '1.25rem' }}>Scan to add songs to the queue</div>
         {qrDataUrl && <img src={qrDataUrl} alt="QR Code" style={{ width: '180px', height: '180px', borderRadius: '8px', marginBottom: '1rem' }} />}
         <div style={{ color: '#555', fontSize: '11px', wordBreak: 'break-all', marginBottom: '1.25rem' }}>{guestUrl}</div>
-        <button onClick={() => { navigator.clipboard.writeText(guestUrl); }}
+        <button onClick={() => { navigator.clipboard.writeText(guestUrl) }}
           style={{ background: 'var(--green)', color: '#000', border: 'none', padding: '10px 24px', borderRadius: '20px', fontFamily: 'var(--font-mono)', fontSize: '13px', cursor: 'pointer', marginBottom: '8px', width: '100%' }}>
           Copy Link
         </button>
@@ -269,109 +269,107 @@ export default function RoomPage() {
   )
 
   const SearchPanel = () => {
-  const [expandedPlaylist, setExpandedPlaylist] = useState<{ id: string; name: string } | null>(null)
-  const [playlistTracks, setPlaylistTracks] = useState<Track[]>([])
-  const [loadingPlaylist, setLoadingPlaylist] = useState(false)
+    const [expandedPlaylist, setExpandedPlaylist] = useState<{ id: string; name: string } | null>(null)
+    const [playlistTracks, setPlaylistTracks] = useState<Track[]>([])
+    const [loadingPlaylist, setLoadingPlaylist] = useState(false)
 
-  const openPlaylist = async (id: string, name: string) => {
-    setExpandedPlaylist({ id, name })
-    setLoadingPlaylist(true)
-    try {
-      const res = await fetch(`/api/player/search?playlistId=${id}`)
-      const data = await res.json()
-      setPlaylistTracks(data.tracks ?? [])
-    } finally {
-      setLoadingPlaylist(false)
+    const openPlaylist = async (id: string, name: string) => {
+      setExpandedPlaylist({ id, name })
+      setLoadingPlaylist(true)
+      try {
+        const res = await fetch(`/api/player/search?playlistId=${id}`)
+        const data = await res.json()
+        setPlaylistTracks(data.tracks ?? [])
+      } finally {
+        setLoadingPlaylist(false)
+      }
     }
-  }
 
-  if (expandedPlaylist) return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
-        <button onClick={() => { setExpandedPlaylist(null); setPlaylistTracks([]) }}
-          style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '18px', padding: '0', lineHeight: 1 }}>←</button>
-        <span style={{ color: 'var(--text)', fontSize: '13px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{expandedPlaylist.name}</span>
-        <button onClick={() => {
-          playlistTracks.forEach(t => addToQueue(t))
-          setExpandedPlaylist(null)
-          setPlaylistTracks([])
-        }}
-          style={{ marginLeft: 'auto', background: 'var(--green)', color: '#000', border: 'none', padding: '5px 12px', borderRadius: '12px', fontFamily: 'var(--font-mono)', fontSize: '11px', cursor: 'pointer', flexShrink: 0 }}>
-          Add all
-        </button>
-      </div>
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-        {loadingPlaylist && (
-          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>Loading...</div>
-        )}
-        {playlistTracks.map(track => (
-          <button key={track.id} onClick={() => { addToQueue(track) }}
-            style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '10px 16px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', textAlign: 'left' }}>
-            <img src={track.album.images[2]?.url || track.album.images[0]?.url} alt=""
-              style={{ width: '40px', height: '40px', borderRadius: '4px', flexShrink: 0 }} />
-            <div style={{ overflow: 'hidden', minWidth: 0, flex: 1 }}>
-              <div style={{ color: 'var(--text)', fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.name}</div>
-              <div style={{ color: 'var(--text-muted)', fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artists.map((a: any) => a.name).join(', ')}</div>
-            </div>
-            <div style={{ color: 'var(--green)', fontSize: '20px', flexShrink: 0 }}>+</div>
+    if (expandedPlaylist) return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+          <button onClick={() => { setExpandedPlaylist(null); setPlaylistTracks([]) }}
+            style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '18px', padding: '0', lineHeight: 1 }}>←</button>
+          <span style={{ color: 'var(--text)', fontSize: '13px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{expandedPlaylist.name}</span>
+          <button onClick={() => {
+            playlistTracks.forEach(t => addToQueue(t))
+            setExpandedPlaylist(null)
+            setPlaylistTracks([])
+          }}
+            style={{ marginLeft: 'auto', background: 'var(--green)', color: '#000', border: 'none', padding: '5px 12px', borderRadius: '12px', fontFamily: 'var(--font-mono)', fontSize: '11px', cursor: 'pointer', flexShrink: 0 }}>
+            Add all
           </button>
-        ))}
-      </div>
-    </div>
-  )
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ padding: '1rem', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-        <div style={{ position: 'relative' }}>
-          <input type="text" placeholder="Search songs or playlists..." value={searchQuery}
-            onChange={e => { setSearchQuery(e.target.value); setSearchOpen(true) }}
-            onFocus={() => setSearchOpen(true)}
-            autoFocus
-            style={{ width: '100%', background: 'var(--mid)', border: '1px solid var(--border)', borderRadius: '8px', padding: '10px 14px', color: 'var(--text)', fontFamily: 'var(--font-mono)', fontSize: '16px', outline: 'none', boxSizing: 'border-box' }} />
-          {searching && <div style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: '11px' }}>...</div>}
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {loadingPlaylist && (
+            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>Loading...</div>
+          )}
+          {playlistTracks.map(track => (
+            <button key={track.id} onClick={() => addToQueue(track)}
+              style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '10px 16px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', textAlign: 'left' }}>
+              <img src={track.album.images[2]?.url || track.album.images[0]?.url} alt=""
+                style={{ width: '40px', height: '40px', borderRadius: '4px', flexShrink: 0 }} />
+              <div style={{ overflow: 'hidden', minWidth: 0, flex: 1 }}>
+                <div style={{ color: 'var(--text)', fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.name}</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artists.map((a: any) => a.name).join(', ')}</div>
+              </div>
+              <div style={{ color: 'var(--green)', fontSize: '20px', flexShrink: 0 }}>+</div>
+            </button>
+          ))}
         </div>
       </div>
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-        {searchResults.length === 0 && (
-          <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
-            {searchQuery.trim() ? 'No results' : 'Search songs or playlists'}
+    )
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div style={{ padding: '1rem', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          <div style={{ position: 'relative' }}>
+            <input type="text" placeholder="Search songs or playlists..." value={searchQuery}
+              onChange={e => { setSearchQuery(e.target.value); setSearchOpen(true) }}
+              onFocus={() => setSearchOpen(true)}
+              autoFocus
+              style={{ width: '100%', background: 'var(--mid)', border: '1px solid var(--border)', borderRadius: '8px', padding: '10px 14px', color: 'var(--text)', fontFamily: 'var(--font-mono)', fontSize: '16px', outline: 'none', boxSizing: 'border-box' }} />
+            {searching && <div style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: '11px' }}>...</div>}
           </div>
-        )}
-        {/* Playlists */}
-        {(searchResults as any[]).filter(r => r.type === 'playlist').map((playlist: any) => (
-          <button key={playlist.id} onClick={() => openPlaylist(playlist.id, playlist.name)}
-            style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '12px 16px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', textAlign: 'left' }}>
-            {playlist.images?.[0] ? (
-              <img src={playlist.images[0].url} alt=""
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {searchResults.length === 0 && (
+            <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
+              {searchQuery.trim() ? 'No results' : 'Search songs or playlists'}
+            </div>
+          )}
+          {searchResults.filter(r => r.type === 'playlist').map((playlist: any) => (
+            <button key={playlist.id} onClick={() => openPlaylist(playlist.id, playlist.name)}
+              style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '12px 16px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', textAlign: 'left' }}>
+              {playlist.images?.[0] ? (
+                <img src={playlist.images[0].url} alt=""
+                  style={{ width: '44px', height: '44px', borderRadius: '4px', flexShrink: 0 }} />
+              ) : (
+                <div style={{ width: '44px', height: '44px', borderRadius: '4px', background: 'var(--mid)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>♫</div>
+              )}
+              <div style={{ overflow: 'hidden', minWidth: 0, flex: 1 }}>
+                <div style={{ color: 'var(--text)', fontSize: '14px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{playlist.name}</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{playlist.tracks?.total ?? '?'} songs · Playlist</div>
+              </div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '14px', flexShrink: 0 }}>→</div>
+            </button>
+          ))}
+          {searchResults.filter(r => r.type !== 'playlist').map((track: any) => (
+            <button key={track.id} onClick={() => addToQueue(track)}
+              style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '12px 16px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', textAlign: 'left' }}>
+              <img src={track.album.images[2]?.url || track.album.images[0]?.url} alt=""
                 style={{ width: '44px', height: '44px', borderRadius: '4px', flexShrink: 0 }} />
-            ) : (
-              <div style={{ width: '44px', height: '44px', borderRadius: '4px', background: 'var(--mid)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>♫</div>
-            )}
-            <div style={{ overflow: 'hidden', minWidth: 0, flex: 1 }}>
-              <div style={{ color: 'var(--text)', fontSize: '14px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{playlist.name}</div>
-              <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{playlist.tracks?.total ?? '?'} songs · Playlist</div>
-            </div>
-            <div style={{ color: 'var(--text-muted)', fontSize: '14px', flexShrink: 0 }}>→</div>
-          </button>
-        ))}
-        {/* Tracks */}
-        {(searchResults as any[]).filter(r => r.type !== 'playlist').map(track => (
-          <button key={track.id} onClick={() => addToQueue(track)}
-            style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '12px 16px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', textAlign: 'left' }}>
-            <img src={track.album.images[2]?.url || track.album.images[0]?.url} alt=""
-              style={{ width: '44px', height: '44px', borderRadius: '4px', flexShrink: 0 }} />
-            <div style={{ overflow: 'hidden', minWidth: 0, flex: 1 }}>
-              <div style={{ color: 'var(--text)', fontSize: '14px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.name}</div>
-              <div style={{ color: 'var(--text-muted)', fontSize: '12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artists.map((a: any) => a.name).join(', ')}</div>
-            </div>
-            <div style={{ color: 'var(--green)', fontSize: '22px', flexShrink: 0 }}>+</div>
-          </button>
-        ))}
+              <div style={{ overflow: 'hidden', minWidth: 0, flex: 1 }}>
+                <div style={{ color: 'var(--text)', fontSize: '14px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.name}</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artists.map((a: any) => a.name).join(', ')}</div>
+              </div>
+              <div style={{ color: 'var(--green)', fontSize: '22px', flexShrink: 0 }}>+</div>
+            </button>
+          ))}
+        </div>
       </div>
-    </div>
-  )
-}
+    )
+  }
 
   const QueuePanel = () => (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -522,31 +520,7 @@ export default function RoomPage() {
             )}
           </div>
           <div className="ph-sidebar">
-            <div style={{ padding: '1rem', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-              <div style={{ position: 'relative' }}>
-                <input type="text" placeholder="Search for a song..." value={searchQuery}
-                  onChange={e => { setSearchQuery(e.target.value); setSearchOpen(true) }}
-                  onFocus={() => setSearchOpen(true)}
-                  style={{ width: '100%', background: 'var(--mid)', border: '1px solid var(--border)', borderRadius: '8px', padding: '10px 14px', color: 'var(--text)', fontFamily: 'var(--font-mono)', fontSize: '13px', outline: 'none', boxSizing: 'border-box' }} />
-                {searching && <div style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: '11px' }}>...</div>}
-              </div>
-              {searchOpen && searchResults.length > 0 && (
-                <div style={{ marginTop: '8px', background: 'var(--dark)', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden', maxHeight: '280px', overflowY: 'auto' }}>
-                  {searchResults.map(track => (
-                    <button key={track.id} onClick={() => addToQueue(track)}
-                      style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '10px 12px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', textAlign: 'left' }}>
-                      <img src={track.album.images[2]?.url || track.album.images[0]?.url} alt=""
-                        style={{ width: '36px', height: '36px', borderRadius: '4px', flexShrink: 0 }} />
-                      <div style={{ overflow: 'hidden', minWidth: 0 }}>
-                        <div style={{ color: 'var(--text)', fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.name}</div>
-                        <div style={{ color: 'var(--text-muted)', fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artists.map((a: any) => a.name).join(', ')}</div>
-                      </div>
-                      <div style={{ marginLeft: 'auto', color: 'var(--green)', fontSize: '16px', flexShrink: 0 }}>+</div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <SearchPanel />
             <div style={{ flex: 1, overflowY: 'auto' }}>
               <div style={{ padding: '8px 16px 4px', color: 'var(--text-muted)', fontSize: '11px', letterSpacing: '0.1em' }}>
                 UP NEXT — {queue.length} song{queue.length !== 1 ? 's' : ''}

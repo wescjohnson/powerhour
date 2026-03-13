@@ -21,7 +21,7 @@ export function getAuthUrl(state: string): string {
     scope: SPOTIFY_SCOPES,
     redirect_uri: process.env.SPOTIFY_REDIRECT_URI!,
     state,
-    show_dialog: 'false',
+    show_dialog: 'true',
   })
   return `${ACCOUNTS_BASE}/authorize?${params}`
 }

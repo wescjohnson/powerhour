@@ -151,11 +151,12 @@ export async function searchTracks(accessToken: string, query: string) {
 }
 
 // --- Audio Analysis (for chorus detection) ---
-export async function getAudioAnalysis(accessToken: string, trackId: string) {
-  return spotifyFetch(`/audio-analysis/${trackId}`, accessToken)
+export async function searchTracks(accessToken: string, query: string) {
+  const params = new URLSearchParams({ q: query, type: 'track,playlist', limit: '5' })
+  return spotifyFetch(`/search?${params}`, accessToken)
 }
 
-// --- User Profile ---
-export async function getUserProfile(accessToken: string) {
-  return spotifyFetch('/me', accessToken)
+export async function getPlaylistTracks(accessToken: string, playlistId: string) {
+  const params = new URLSearchParams({ limit: '50', fields: 'items(track(id,name,uri,duration_ms,artists,album))' })
+  return spotifyFetch(`/playlists/${playlistId}/tracks?${params}`, accessToken)
 }

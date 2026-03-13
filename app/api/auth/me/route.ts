@@ -22,14 +22,13 @@ export async function GET() {
     }
   }
 
-  return NextResponse.json({
+return NextResponse.json({
     authenticated: true,
     userId: session.userId,
     displayName: session.displayName,
-    // Send token to client for Web Playback SDK
     accessToken: session.accessToken,
+    roomId: session.userId,
   })
-}
 
 export async function DELETE() {
   const session = await getSession()

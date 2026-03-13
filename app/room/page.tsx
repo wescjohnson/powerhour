@@ -54,7 +54,7 @@ export default function RoomPage() {
   const startNextRoundRef = useRef<(() => Promise<void>) | null>(null)
   const queueRef = useRef<QueuedTrack[]>([])
 
-  const { state: playerState, play, pause } = useSpotifyPlayer(user?.accessToken ?? null)
+  const { state: playerState, play, pause, refreshMobileDevice } = useSpotifyPlayer(user?.accessToken ?? null)
 
   useEffect(() => { queueRef.current = queue }, [queue])
 
@@ -107,8 +107,7 @@ export default function RoomPage() {
     setMobileTab('player')
 
     const chorusMs = next.chorusMs ?? Math.floor(next.duration_ms * 0.40)
-
-    console.log(`[PowerHour] Playing "${next.name}" from ${chorusMs}ms (${Math.round(chorusMs / 1000)}s)`)
+    console.log(`[PowerHour] Playing "${next.name}" from ${chorusMs}ms`)
 
     setPhase('playing')
     await play(next.uri, chorusMs)
@@ -168,15 +167,12 @@ export default function RoomPage() {
     </div>
   )
 
-  const circumference = 2 * Math.PI * 45
-  const dashOffset = circumference * (1 - timeLeft / 60)
-
   const TimerCircle = ({ size = 160, fontSize = 52 }: { size?: number; fontSize?: number }) => {
     const r = 45
     const circ = 2 * Math.PI * r
     const offset = circ * (1 - timeLeft / 60)
     return (
-      <div style={{ position: 'relative', width: size, height: size }}>
+      <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
         <svg width={size} height={size} viewBox="0 0 100 100">
           <circle cx="50" cy="50" r={r} fill="none" stroke="var(--mid)" strokeWidth="3" />
           <circle cx="50" cy="50" r={r} fill="none"
@@ -199,21 +195,17 @@ export default function RoomPage() {
 
   const SearchPanel = () => (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ padding: '1rem', borderBottom: '1px solid var(--border)' }}>
+      <div style={{ padding: '1rem', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         <div style={{ position: 'relative' }}>
-          <input
-            type="text"
-            placeholder="Search for a song..."
-            value={searchQuery}
+          <input type="text" placeholder="Search for a song..." value={searchQuery}
             onChange={e => { setSearchQuery(e.target.value); setSearchOpen(true) }}
             onFocus={() => setSearchOpen(true)}
             autoFocus
-            style={{ width: '100%', background: 'var(--mid)', border: '1px solid var(--border)', borderRadius: '8px', padding: '10px 14px', color: 'var(--text)', fontFamily: 'var(--font-mono)', fontSize: '13px', outline: 'none', boxSizing: 'border-box' }}
-          />
+            style={{ width: '100%', background: 'var(--mid)', border: '1px solid var(--border)', borderRadius: '8px', padding: '10px 14px', color: 'var(--text)', fontFamily: 'var(--font-mono)', fontSize: '13px', outline: 'none', boxSizing: 'border-box' }} />
           {searching && <div style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: '11px' }}>...</div>}
         </div>
       </div>
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' } as any}>
         {searchResults.length === 0 && (
           <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
             {searchQuery.trim() ? 'No results' : 'Type to search Spotify'}
@@ -221,14 +213,14 @@ export default function RoomPage() {
         )}
         {searchResults.map(track => (
           <button key={track.id} onClick={() => addToQueue(track)}
-            style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '10px 16px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', textAlign: 'left' }}>
+            style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '12px 16px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', textAlign: 'left' }}>
             <img src={track.album.images[2]?.url || track.album.images[0]?.url} alt=""
-              style={{ width: '40px', height: '40px', borderRadius: '4px', flexShrink: 0 }} />
+              style={{ width: '44px', height: '44px', borderRadius: '4px', flexShrink: 0 }} />
             <div style={{ overflow: 'hidden', minWidth: 0, flex: 1 }}>
               <div style={{ color: 'var(--text)', fontSize: '14px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.name}</div>
               <div style={{ color: 'var(--text-muted)', fontSize: '12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artists.map((a: any) => a.name).join(', ')}</div>
             </div>
-            <div style={{ marginLeft: 'auto', color: 'var(--green)', fontSize: '20px', flexShrink: 0 }}>+</div>
+            <div style={{ marginLeft: 'auto', color: 'var(--green)', fontSize: '22px', flexShrink: 0 }}>+</div>
           </button>
         ))}
       </div>
@@ -237,10 +229,10 @@ export default function RoomPage() {
 
   const QueuePanel = () => (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: '11px', letterSpacing: '0.1em' }}>
+      <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: '11px', letterSpacing: '0.1em', flexShrink: 0 }}>
         UP NEXT — {queue.length} song{queue.length !== 1 ? 's' : ''}
       </div>
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' } as any}>
         {queue.length === 0 && (
           <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>No songs in queue — tap Add to search</div>
         )}
@@ -248,13 +240,13 @@ export default function RoomPage() {
           <div key={`${track.id}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
             <span style={{ color: 'var(--text-muted)', fontSize: '11px', width: '16px', flexShrink: 0 }}>{i + 1}</span>
             <img src={track.album.images[2]?.url || track.album.images[0]?.url} alt=""
-              style={{ width: '40px', height: '40px', borderRadius: '4px', flexShrink: 0 }} />
+              style={{ width: '44px', height: '44px', borderRadius: '4px', flexShrink: 0 }} />
             <div style={{ overflow: 'hidden', minWidth: 0, flex: 1 }}>
               <div style={{ color: 'var(--text)', fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.name}</div>
               <div style={{ color: 'var(--text-muted)', fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artists.map((a: any) => a.name).join(', ')}</div>
             </div>
             <button onClick={() => setQueue(prev => prev.filter((_, idx) => idx !== i))}
-              style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '20px', flexShrink: 0, padding: '0 4px' }}>×</button>
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '22px', flexShrink: 0, padding: '0 4px' }}>×</button>
           </div>
         ))}
       </div>
@@ -268,7 +260,7 @@ export default function RoomPage() {
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
     gap: '3px',
-    padding: '8px 0',
+    padding: '10px 0 calc(10px + env(safe-area-inset-bottom))',
     background: 'transparent',
     border: 'none',
     cursor: 'pointer',
@@ -278,26 +270,71 @@ export default function RoomPage() {
     letterSpacing: '0.05em',
   })
 
+  const MobileDeviceStatus = () => {
+    if (playerState.isReady) return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--green)', fontSize: '12px' }}>
+        <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--green)' }} />
+        Spotify connected
+      </div>
+    )
+    if (playerState.error) return (
+      <div style={{ textAlign: 'center', maxWidth: '280px' }}>
+        <div style={{ color: '#ff6b6b', fontSize: '13px', marginBottom: '12px' }}>{playerState.error}</div>
+        <button onClick={refreshMobileDevice}
+          style={{ background: 'var(--green)', color: '#000', border: 'none', padding: '10px 24px', borderRadius: '20px', fontFamily: 'var(--font-mono)', fontSize: '13px', cursor: 'pointer' }}>
+          Retry
+        </button>
+      </div>
+    )
+    return (
+      <div style={{ textAlign: 'center', maxWidth: '280px' }}>
+        <div style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '4px' }}>Open Spotify, play any song,</div>
+        <div style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '16px' }}>then come back here.</div>
+        <div style={{ color: 'var(--text-muted)', fontSize: '11px', opacity: 0.6 }}>Searching for device...</div>
+      </div>
+    )
+  }
+
   return (
     <>
       <style>{`
-        .ph-layout { display: grid; grid-template-columns: 1fr 360px; flex: 1; }
-        .ph-sidebar { display: flex; flex-direction: column; height: calc(100vh - 57px); border-left: 1px solid var(--border); }
-        .ph-mobile-tabs { display: none; }
-        .ph-mobile-content { display: none; }
+        html, body { height: 100%; margin: 0; }
+        .ph-root { height: 100dvh; display: flex; flex-direction: column; background: var(--black); overflow: hidden; }
+        .ph-layout { display: grid; grid-template-columns: 1fr 360px; flex: 1; overflow: hidden; }
+        .ph-sidebar { display: flex; flex-direction: column; overflow: hidden; border-left: 1px solid var(--border); }
+        .ph-mobile-wrap { display: none; }
         @media (max-width: 768px) {
           .ph-layout { display: none; }
-          .ph-mobile-content { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
-          .ph-mobile-tabs { display: flex; border-top: 1px solid var(--border); background: var(--dark); flex-shrink: 0; }
+          .ph-mobile-wrap {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            overflow: hidden;
+            min-height: 0;
+          }
+          .ph-mobile-body {
+            flex: 1;
+            overflow: hidden;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+          }
+          .ph-tab-bar {
+            flex-shrink: 0;
+            display: flex;
+            border-top: 1px solid var(--border);
+            background: var(--dark);
+          }
         }
       `}</style>
 
-      <div style={{ minHeight: '100vh', background: 'var(--black)', display: 'flex', flexDirection: 'column' }}>
+      <div className="ph-root">
 
-        <header style={{ borderBottom: '1px solid var(--border)', padding: '1rem 1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ fontSize: '20px' }}>🍺</span>
-            <span style={{ fontFamily: 'var(--font-display)', fontSize: '20px', letterSpacing: '0.05em', color: 'var(--green)' }}>POWER HOUR</span>
+        {/* Header */}
+        <header style={{ borderBottom: '1px solid var(--border)', padding: '0.875rem 1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '18px' }}>🍺</span>
+            <span style={{ fontFamily: 'var(--font-display)', fontSize: '18px', letterSpacing: '0.05em', color: 'var(--green)' }}>POWER HOUR</span>
             {phase === 'playing' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--green)' }} />
@@ -306,7 +343,7 @@ export default function RoomPage() {
             )}
             {phase === 'analyzing' && <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>Loading...</span>}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Round <span style={{ color: 'var(--green)' }}>{roundNumber}</span></span>
             <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{user?.displayName}</span>
           </div>
@@ -314,10 +351,8 @@ export default function RoomPage() {
 
         {/* Desktop */}
         <div className="ph-layout">
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '3rem 2rem', borderRight: '1px solid var(--border)' }}>
-            <div style={{ marginBottom: '2rem' }}>
-              <TimerCircle size={160} fontSize={52} />
-            </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '3rem 2rem', borderRight: '1px solid var(--border)', overflowY: 'auto' }}>
+            <div style={{ marginBottom: '2rem' }}><TimerCircle size={160} fontSize={52} /></div>
             {currentTrack ? (
               <div style={{ textAlign: 'center', maxWidth: '380px' }}>
                 {currentTrack.album.images[0] && (
@@ -327,9 +362,7 @@ export default function RoomPage() {
                 <div style={{ fontFamily: 'var(--font-display)', fontSize: '28px', color: '#fff', marginBottom: '4px' }}>{currentTrack.name}</div>
                 <div style={{ color: 'var(--text-mid)', fontSize: '13px', marginBottom: '1.5rem' }}>{currentTrack.artists.map((a: any) => a.name).join(', ')}</div>
                 {phase === 'playing' && (
-                  <button onClick={skipSong} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', padding: '8px 20px', borderRadius: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', cursor: 'pointer' }}>
-                    Skip →
-                  </button>
+                  <button onClick={skipSong} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', padding: '8px 20px', borderRadius: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', cursor: 'pointer' }}>Skip →</button>
                 )}
               </div>
             ) : (
@@ -355,7 +388,7 @@ export default function RoomPage() {
             )}
           </div>
           <div className="ph-sidebar">
-            <div style={{ padding: '1rem', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ padding: '1rem', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
               <div style={{ position: 'relative' }}>
                 <input type="text" placeholder="Search for a song..." value={searchQuery}
                   onChange={e => { setSearchQuery(e.target.value); setSearchOpen(true) }}
@@ -380,7 +413,7 @@ export default function RoomPage() {
                 </div>
               )}
             </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem 0' }}>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
               <div style={{ padding: '8px 16px 4px', color: 'var(--text-muted)', fontSize: '11px', letterSpacing: '0.1em' }}>
                 UP NEXT — {queue.length} song{queue.length !== 1 ? 's' : ''}
               </div>
@@ -405,20 +438,20 @@ export default function RoomPage() {
         </div>
 
         {/* Mobile */}
-        <div className="ph-mobile-content">
-          <div style={{ flex: 1, overflow: 'hidden' }}>
+        <div className="ph-mobile-wrap">
+          <div className="ph-mobile-body">
             {mobileTab === 'player' && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '2rem 1rem 1rem', overflowY: 'auto', height: '100%', boxSizing: 'border-box' }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '1.5rem 1rem', overflowY: 'auto', gap: '1.25rem' }}>
                 <TimerCircle size={140} fontSize={44} />
-                <div style={{ height: '1.5rem' }} />
+                <MobileDeviceStatus />
                 {currentTrack ? (
-                  <div style={{ textAlign: 'center', width: '100%', maxWidth: '320px' }}>
+                  <div style={{ textAlign: 'center', width: '100%', maxWidth: '300px' }}>
                     {currentTrack.album.images[0] && (
                       <img src={currentTrack.album.images[0].url} alt={currentTrack.album.name}
-                        style={{ width: '100px', height: '100px', borderRadius: '8px', marginBottom: '1rem', opacity: phase === 'analyzing' ? 0.6 : 1, transition: 'opacity 0.3s ease' }} />
+                        style={{ width: '96px', height: '96px', borderRadius: '8px', marginBottom: '0.875rem', opacity: phase === 'analyzing' ? 0.6 : 1, transition: 'opacity 0.3s ease' }} />
                     )}
-                    <div style={{ fontFamily: 'var(--font-display)', fontSize: '22px', color: '#fff', marginBottom: '4px' }}>{currentTrack.name}</div>
-                    <div style={{ color: 'var(--text-mid)', fontSize: '13px', marginBottom: '1.25rem' }}>{currentTrack.artists.map((a: any) => a.name).join(', ')}</div>
+                    <div style={{ fontFamily: 'var(--font-display)', fontSize: '20px', color: '#fff', marginBottom: '4px' }}>{currentTrack.name}</div>
+                    <div style={{ color: 'var(--text-mid)', fontSize: '13px', marginBottom: '1rem' }}>{currentTrack.artists.map((a: any) => a.name).join(', ')}</div>
                     {phase === 'playing' && (
                       <button onClick={skipSong} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', padding: '10px 24px', borderRadius: '20px', fontFamily: 'var(--font-mono)', fontSize: '13px', cursor: 'pointer' }}>
                         Skip →
@@ -427,32 +460,24 @@ export default function RoomPage() {
                   </div>
                 ) : (
                   <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
-                    <div style={{ fontSize: '40px', marginBottom: '0.75rem' }}>🎵</div>
-                    <div style={{ fontSize: '14px', marginBottom: '0.5rem' }}>Queue is empty</div>
+                    <div style={{ fontSize: '36px', marginBottom: '0.5rem' }}>🎵</div>
+                    <div style={{ fontSize: '14px', marginBottom: '4px' }}>Queue is empty</div>
                     <div style={{ fontSize: '12px' }}>Tap Add to search for songs</div>
                   </div>
                 )}
-                {phase === 'waiting' && queue.length > 0 && (
+                {phase === 'waiting' && queue.length > 0 && playerState.isReady && (
                   <button onClick={startNextRound}
-                    style={{ marginTop: '1.5rem', background: 'var(--green)', color: '#000', border: 'none', padding: '14px 40px', borderRadius: '40px', fontFamily: 'var(--font-mono)', fontWeight: 500, fontSize: '14px', cursor: 'pointer', letterSpacing: '0.05em' }}>
+                    style={{ background: 'var(--green)', color: '#000', border: 'none', padding: '14px 40px', borderRadius: '40px', fontFamily: 'var(--font-mono)', fontWeight: 500, fontSize: '14px', cursor: 'pointer', letterSpacing: '0.05em' }}>
                     Start Power Hour 🍺
                   </button>
                 )}
-                {playerState.error && (
-                  <div style={{ marginTop: '1rem', background: 'rgba(255,50,50,0.1)', border: '1px solid rgba(255,50,50,0.2)', borderRadius: '6px', padding: '10px 16px', color: '#ff6b6b', fontSize: '12px', width: '100%', maxWidth: '320px', textAlign: 'center', boxSizing: 'border-box' }}>
-                    {playerState.error}
-                  </div>
-                )}
-                {!playerState.isReady && !playerState.error && (
-                  <div style={{ marginTop: '1rem', color: 'var(--text-muted)', fontSize: '12px' }}>Connecting to Spotify...</div>
-                )}
               </div>
             )}
-            {mobileTab === 'queue' && <div style={{ height: '100%', overflow: 'hidden' }}><QueuePanel /></div>}
-            {mobileTab === 'add' && <div style={{ height: '100%', overflow: 'hidden' }}><SearchPanel /></div>}
+            {mobileTab === 'queue' && <QueuePanel />}
+            {mobileTab === 'add' && <SearchPanel />}
           </div>
 
-          <div className="ph-mobile-tabs">
+          <div className="ph-tab-bar">
             <button style={tabStyle('player')} onClick={() => setMobileTab('player')}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>

@@ -144,12 +144,6 @@ export async function getCurrentPlayback(accessToken: string) {
   return spotifyFetch('/me/player', accessToken)
 }
 
-// --- Search ---
-export async function searchTracks(accessToken: string, query: string) {
-  const params = new URLSearchParams({ q: query, type: 'track', limit: '10' })
-  return spotifyFetch(`/search?${params}`, accessToken)
-}
-
 // --- Audio Analysis (for chorus detection) ---
 export async function searchTracks(accessToken: string, query: string) {
   const params = new URLSearchParams({ q: query, type: 'track,playlist', limit: '5' })

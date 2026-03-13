@@ -1,6 +1,4 @@
 // lib/spotify.ts
-// Core Spotify API wrapper - handles OAuth tokens and API calls
-
 const SPOTIFY_BASE = 'https://api.spotify.com/v1'
 const ACCOUNTS_BASE = 'https://accounts.spotify.com'
 
@@ -123,7 +121,7 @@ export async function searchTracks(accessToken: string, query: string) {
 }
 
 export async function getPlaylistTracks(accessToken: string, playlistId: string) {
-  const params = new URLSearchParams({ limit: '50', fields: 'items(track(id,name,uri,duration_ms,artists,album))' })
+  const params = new URLSearchParams({ limit: '50' })
   return spotifyFetch(`/playlists/${playlistId}/tracks?${params}`, accessToken)
 }
 

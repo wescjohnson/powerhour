@@ -563,12 +563,3 @@ export default function RoomPage() {
     </>
   )
 }
-```
-
----
-
-Then you need two more things:
-
-**1. Install the QR code package** — add this to `package.json` dependencies:
-```
-"qrcode": "^1.5.3"

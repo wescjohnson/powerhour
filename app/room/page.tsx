@@ -1,115 +1,111 @@
 'use client'
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { useSpotifyPlayer } from '@/hooks/useSpotifyPlayer'
+import { useEffect, useRef, useState, useCallback } from 'react'
 
-async function fetchChorusPosition(trackId: string, durationMs: number): Promise<number> {
-  return Math.floor(durationMs * 0.40)
+export interface PlayerState {
+  isReady: boolean
+  deviceId: string | null
+  isPlaying: boolean
+  error: string | null
 }
 
-interface Track {
-  id: string
-  name: string
-  artists: { name: string }[]
-  album: { name: string; images: { url: string }[] }
-  uri: string
-  duration_ms: number
-}
-
-interface QueuedTrack extends Track {
-  chorusMs?: number
-  analysisReady?: boolean
-}
-
-type RoomPhase = 'waiting' | 'analyzing' | 'playing' | 'between'
-
-export default function RoomPage() {
-  const [user, setUser] = useState<{ displayName: string; accessToken: string } | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [queue, setQueue] = useState<QueuedTrack[]>([])
-  const [currentTrack, setCurrentTrack] = useState<QueuedTrack | null>(null)
-  const [roundNumber, setRoundNumber] = useState(0)
-  const [phase, setPhase] = useState<RoomPhase>('waiting')
-  const [timeLeft, setTimeLeft] = useState(60)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<Track[]>([])
-  const [searching, setSearching] = useState(false)
-  const [searchOpen, setSearchOpen] = useState(false)
-
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const roundStartRef = useRef<number>(0)
-  const startNextRoundRef = useRef<(() => Promise<void>) | null>(null)
-  const queueRef = useRef<QueuedTrack[]>([])
-
-  const { state: playerState, play, pause } = useSpotifyPlayer(user?.accessToken ?? null)
-
-  useEffect(() => { queueRef.current = queue }, [queue])
+export function useSpotifyPlayer(accessToken: string | null) {
+  const playerRef = useRef<Spotify.Player | null>(null)
+  const [state, setState] = useState<PlayerState>({
+    isReady: false,
+    deviceId: null,
+    isPlaying: false,
+    error: null,
+  })
 
   useEffect(() => {
-    fetch('/api/auth/me')
-      .then(r => r.json())
-      .then(data => {
-        if (data.authenticated) {
-          setUser({ displayName: data.displayName, accessToken: data.accessToken })
-        } else {
-          window.location.href = '/'
-        }
-        setLoading(false)
+    if (!accessToken) return
+
+    const initPlayer = () => {
+      const player = new window.Spotify.Player({
+        name: 'Power Hour 🍺',
+        getOAuthToken: (cb: (token: string) => void) => cb(accessToken),
+        volume: 0.8,
       })
-  }, [])
 
-  const startNextRound = useCallback(async () => {
-    let q = queueRef.current
+      player.addListener('ready', ({ device_id }: { device_id: string }) => {
+        console.log('Spotify player ready, device:', device_id)
+        setState(prev => ({ ...prev, isReady: true, deviceId: device_id, error: null }))
+      })
 
-    if (q.length === 0) {
-      setPhase('analyzing')
-      try {
-        const res = await fetch('/api/player/liked')
-        const data = await res.json()
-        if (data.tracks && data.tracks.length > 0) {
-          const refill = data.tracks.slice(0, 10).map((t: any) => ({
-            ...t,
-            analysisReady: false,
-          }))
-          setQueue(refill)
-          queueRef.current = refill
-          q = refill
-          refill.forEach((track: any) => {
-            fetchChorusPosition(track.id, track.duration_ms).then(chorusMs => {
-              setQueue(prev => prev.map(t =>
-                t.id === track.id && !t.analysisReady
-                  ? { ...t, chorusMs, analysisReady: true }
-                  : t
-              ))
-            })
-          })
-        } else {
-          setPhase('waiting')
-          setCurrentTrack(null)
-          return
-        }
-      } catch {
-        setPhase('waiting')
-        setCurrentTrack(null)
-        return
-      }
+      player.addListener('not_ready', () => {
+        setState(prev => ({ ...prev, isReady: false }))
+      })
+
+      player.addListener('initialization_error', ({ message }: { message: string }) => {
+        setState(prev => ({ ...prev, error: `Init error: ${message}` }))
+      })
+      player.addListener('authentication_error', ({ message }: { message: string }) => {
+        setState(prev => ({ ...prev, error: `Auth error: ${message}` }))
+      })
+      player.addListener('account_error', ({ message }: { message: string }) => {
+        setState(prev => ({ ...prev, error: `${message} (Spotify Premium required)` }))
+      })
+      player.addListener('playback_error', ({ message }: { message: string }) => {
+        setState(prev => ({ ...prev, error: `Playback error: ${message}` }))
+      })
+
+      player.connect()
+      playerRef.current = player
     }
 
-    const next = q[0]
-    setQueue(prev => prev.slice(1))
-    setCurrentTrack(next)
-    setRoundNumber(n => n + 1)
+    if (window.Spotify) {
+      initPlayer()
+    } else {
+      const script = document.createElement('script')
+      script.src = 'https://sdk.scdn.co/spotify-player.js'
+      script.async = true
+      document.body.appendChild(script)
+      window.onSpotifyWebPlaybackSDKReady = initPlayer
+    }
 
-    setPhase('analyzing')
-    const chorusMs = next.chorusMs ?? await fetchChorusPosition(next.id, next.duration_ms)
+    return () => { playerRef.current?.disconnect() }
+  }, [accessToken])
 
-    console.log(`[PowerHour] Playing "${next.name}" from ${chorusMs}ms (${Math.round(chorusMs / 1000)}s) — duration_ms: ${next.duration_ms}`)
+  const play = useCallback(async (trackUri: string, positionMs: number) => {
+    if (!state.deviceId || !accessToken) return
 
-    setPhase('playing')
-    await play(next.uri, chorusMs)
+    console.log(`[Player] Starting ${trackUri} then seeking to ${positionMs}ms`)
 
-    roundStartRef.current = Date.now()
-    setTimeLeft(60)
-    if (timerRef.current) clearInterval(timerRef.current)
-    timerRef.current = setInterval(() => {
-      const elapsed = (Date.now() - roundStartRef.current) / 1000
-      const le
+    // Step 1: Start playback from beginning
+    await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${state.deviceId}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ uris: [trackUri] }),
+    })
+
+    // Step 2: Wait briefly for playback to start, then seek to chorus
+    await new Promise(res => setTimeout(res, 800))
+
+    await fetch(`https://api.spotify.com/v1/me/player/seek?position_ms=${positionMs}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+
+    console.log(`[Player] Seeked to ${positionMs}ms (${Math.round(positionMs/1000)}s)`)
+  }, [state.deviceId, accessToken])
+
+  const pause = useCallback(async () => {
+    if (!accessToken) return
+    await fetch('https://api.spotify.com/v1/me/player/pause', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+  }, [accessToken])
+
+  return { state, play, pause }
+}
+
+declare global {
+  interface Window {
+    Spotify: typeof Spotify
+    onSpotifyWebPlaybackSDKReady: () => void
+  }
+}

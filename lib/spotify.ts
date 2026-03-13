@@ -4,11 +4,6 @@
 const SPOTIFY_BASE = 'https://api.spotify.com/v1'
 const ACCOUNTS_BASE = 'https://accounts.spotify.com'
 
-// Scopes required for Power Hour
-// - streaming: Web Playback SDK
-// - user-read-email + user-read-private: Required for Playback SDK
-// - user-modify-playback-state: Play, pause, seek, queue
-// - user-read-playback-state: Get current track state
 export const SPOTIFY_SCOPES = [
   'streaming',
   'user-read-email',
@@ -16,9 +11,9 @@ export const SPOTIFY_SCOPES = [
   'user-modify-playback-state',
   'user-read-playback-state',
   'user-read-currently-playing',
+  'user-library-read',
 ].join(' ')
 
-// --- Auth URL Generation ---
 export function getAuthUrl(state: string): string {
   const params = new URLSearchParams({
     response_type: 'code',
@@ -31,7 +26,6 @@ export function getAuthUrl(state: string): string {
   return `${ACCOUNTS_BASE}/authorize?${params}`
 }
 
-// --- Token Exchange ---
 export async function exchangeCodeForTokens(code: string) {
   const response = await fetch(`${ACCOUNTS_BASE}/api/token`, {
     method: 'POST',
@@ -47,11 +41,7 @@ export async function exchangeCodeForTokens(code: string) {
       redirect_uri: process.env.SPOTIFY_REDIRECT_URI!,
     }),
   })
-
-  if (!response.ok) {
-    throw new Error(`Token exchange failed: ${response.status}`)
-  }
-
+  if (!response.ok) throw new Error(`Token exchange failed: ${response.status}`)
   const data = await response.json()
   return {
     accessToken: data.access_token as string,
@@ -60,7 +50,6 @@ export async function exchangeCodeForTokens(code: string) {
   }
 }
 
-// --- Token Refresh ---
 export async function refreshAccessToken(refreshToken: string) {
   const response = await fetch(`${ACCOUNTS_BASE}/api/token`, {
     method: 'POST',
@@ -75,11 +64,7 @@ export async function refreshAccessToken(refreshToken: string) {
       refresh_token: refreshToken,
     }),
   })
-
-  if (!response.ok) {
-    throw new Error(`Token refresh failed: ${response.status}`)
-  }
-
+  if (!response.ok) throw new Error(`Token refresh failed: ${response.status}`)
   const data = await response.json()
   return {
     accessToken: data.access_token as string,
@@ -87,7 +72,6 @@ export async function refreshAccessToken(refreshToken: string) {
   }
 }
 
-// --- API Helper ---
 async function spotifyFetch(
   endpoint: string,
   accessToken: string,
@@ -101,18 +85,14 @@ async function spotifyFetch(
       ...options.headers,
     },
   })
-
   if (!response.ok) {
     const error = await response.text()
     throw new Error(`Spotify API error ${response.status}: ${error}`)
   }
-
-  // Some endpoints return 204 No Content
   if (response.status === 204) return null
   return response.json()
 }
 
-// --- Playback Control ---
 export async function playTrack(
   accessToken: string,
   deviceId: string,
@@ -121,10 +101,7 @@ export async function playTrack(
 ) {
   return spotifyFetch(`/me/player/play?device_id=${deviceId}`, accessToken, {
     method: 'PUT',
-    body: JSON.stringify({
-      uris: [trackUri],
-      position_ms: positionMs,
-    }),
+    body: JSON.stringify({ uris: [trackUri], position_ms: positionMs }),
   })
 }
 
@@ -133,18 +110,13 @@ export async function pausePlayback(accessToken: string) {
 }
 
 export async function seekToPosition(accessToken: string, positionMs: number) {
-  return spotifyFetch(
-    `/me/player/seek?position_ms=${positionMs}`,
-    accessToken,
-    { method: 'PUT' }
-  )
+  return spotifyFetch(`/me/player/seek?position_ms=${positionMs}`, accessToken, { method: 'PUT' })
 }
 
 export async function getCurrentPlayback(accessToken: string) {
   return spotifyFetch('/me/player', accessToken)
 }
 
-// --- Audio Analysis (for chorus detection) ---
 export async function searchTracks(accessToken: string, query: string) {
   const params = new URLSearchParams({ q: query, type: 'track,playlist', limit: '5' })
   return spotifyFetch(`/search?${params}`, accessToken)
@@ -153,4 +125,12 @@ export async function searchTracks(accessToken: string, query: string) {
 export async function getPlaylistTracks(accessToken: string, playlistId: string) {
   const params = new URLSearchParams({ limit: '50', fields: 'items(track(id,name,uri,duration_ms,artists,album))' })
   return spotifyFetch(`/playlists/${playlistId}/tracks?${params}`, accessToken)
+}
+
+export async function getAudioAnalysis(accessToken: string, trackId: string) {
+  return spotifyFetch(`/audio-analysis/${trackId}`, accessToken)
+}
+
+export async function getUserProfile(accessToken: string) {
+  return spotifyFetch('/me', accessToken)
 }

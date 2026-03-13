@@ -10,6 +10,8 @@ export const SPOTIFY_SCOPES = [
   'user-read-playback-state',
   'user-read-currently-playing',
   'user-library-read',
+  'playlist-read-private',
+  'playlist-read-collaborative',
 ].join(' ')
 
 export function getAuthUrl(state: string): string {

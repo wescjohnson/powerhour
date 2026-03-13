@@ -268,25 +268,95 @@ export default function RoomPage() {
     </div>
   )
 
-  const SearchPanel = () => (
+  const SearchPanel = () => {
+  const [expandedPlaylist, setExpandedPlaylist] = useState<{ id: string; name: string } | null>(null)
+  const [playlistTracks, setPlaylistTracks] = useState<Track[]>([])
+  const [loadingPlaylist, setLoadingPlaylist] = useState(false)
+
+  const openPlaylist = async (id: string, name: string) => {
+    setExpandedPlaylist({ id, name })
+    setLoadingPlaylist(true)
+    try {
+      const res = await fetch(`/api/player/search?playlistId=${id}`)
+      const data = await res.json()
+      setPlaylistTracks(data.tracks ?? [])
+    } finally {
+      setLoadingPlaylist(false)
+    }
+  }
+
+  if (expandedPlaylist) return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+        <button onClick={() => { setExpandedPlaylist(null); setPlaylistTracks([]) }}
+          style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '18px', padding: '0', lineHeight: 1 }}>←</button>
+        <span style={{ color: 'var(--text)', fontSize: '13px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{expandedPlaylist.name}</span>
+        <button onClick={() => {
+          playlistTracks.forEach(t => addToQueue(t))
+          setExpandedPlaylist(null)
+          setPlaylistTracks([])
+        }}
+          style={{ marginLeft: 'auto', background: 'var(--green)', color: '#000', border: 'none', padding: '5px 12px', borderRadius: '12px', fontFamily: 'var(--font-mono)', fontSize: '11px', cursor: 'pointer', flexShrink: 0 }}>
+          Add all
+        </button>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {loadingPlaylist && (
+          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>Loading...</div>
+        )}
+        {playlistTracks.map(track => (
+          <button key={track.id} onClick={() => { addToQueue(track) }}
+            style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '10px 16px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', textAlign: 'left' }}>
+            <img src={track.album.images[2]?.url || track.album.images[0]?.url} alt=""
+              style={{ width: '40px', height: '40px', borderRadius: '4px', flexShrink: 0 }} />
+            <div style={{ overflow: 'hidden', minWidth: 0, flex: 1 }}>
+              <div style={{ color: 'var(--text)', fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.name}</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artists.map((a: any) => a.name).join(', ')}</div>
+            </div>
+            <div style={{ color: 'var(--green)', fontSize: '20px', flexShrink: 0 }}>+</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+
+  return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ padding: '1rem', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         <div style={{ position: 'relative' }}>
-          <input type="text" placeholder="Search for a song..." value={searchQuery}
+          <input type="text" placeholder="Search songs or playlists..." value={searchQuery}
             onChange={e => { setSearchQuery(e.target.value); setSearchOpen(true) }}
             onFocus={() => setSearchOpen(true)}
             autoFocus
-            style={{ width: '100%', background: 'var(--mid)', border: '1px solid var(--border)', borderRadius: '8px', padding: '10px 14px', color: 'var(--text)', fontFamily: 'var(--font-mono)', fontSize: '13px', outline: 'none', boxSizing: 'border-box' }} />
+            style={{ width: '100%', background: 'var(--mid)', border: '1px solid var(--border)', borderRadius: '8px', padding: '10px 14px', color: 'var(--text)', fontFamily: 'var(--font-mono)', fontSize: '16px', outline: 'none', boxSizing: 'border-box' }} />
           {searching && <div style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: '11px' }}>...</div>}
         </div>
       </div>
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {searchResults.length === 0 && (
           <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
-            {searchQuery.trim() ? 'No results' : 'Type to search Spotify'}
+            {searchQuery.trim() ? 'No results' : 'Search songs or playlists'}
           </div>
         )}
-        {searchResults.map(track => (
+        {/* Playlists */}
+        {(searchResults as any[]).filter(r => r.type === 'playlist').map((playlist: any) => (
+          <button key={playlist.id} onClick={() => openPlaylist(playlist.id, playlist.name)}
+            style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '12px 16px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', textAlign: 'left' }}>
+            {playlist.images?.[0] ? (
+              <img src={playlist.images[0].url} alt=""
+                style={{ width: '44px', height: '44px', borderRadius: '4px', flexShrink: 0 }} />
+            ) : (
+              <div style={{ width: '44px', height: '44px', borderRadius: '4px', background: 'var(--mid)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>♫</div>
+            )}
+            <div style={{ overflow: 'hidden', minWidth: 0, flex: 1 }}>
+              <div style={{ color: 'var(--text)', fontSize: '14px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{playlist.name}</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{playlist.tracks?.total ?? '?'} songs · Playlist</div>
+            </div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '14px', flexShrink: 0 }}>→</div>
+          </button>
+        ))}
+        {/* Tracks */}
+        {(searchResults as any[]).filter(r => r.type !== 'playlist').map(track => (
           <button key={track.id} onClick={() => addToQueue(track)}
             style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '12px 16px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', textAlign: 'left' }}>
             <img src={track.album.images[2]?.url || track.album.images[0]?.url} alt=""
@@ -295,12 +365,13 @@ export default function RoomPage() {
               <div style={{ color: 'var(--text)', fontSize: '14px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.name}</div>
               <div style={{ color: 'var(--text-muted)', fontSize: '12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artists.map((a: any) => a.name).join(', ')}</div>
             </div>
-            <div style={{ marginLeft: 'auto', color: 'var(--green)', fontSize: '22px', flexShrink: 0 }}>+</div>
+            <div style={{ color: 'var(--green)', fontSize: '22px', flexShrink: 0 }}>+</div>
           </button>
         ))}
       </div>
     </div>
   )
+}
 
   const QueuePanel = () => (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

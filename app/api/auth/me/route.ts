@@ -1,16 +1,12 @@
-// app/api/auth/me/route.ts
 import { NextResponse } from 'next/server'
 import { getSession, isTokenExpired } from '@/lib/session'
 import { refreshAccessToken } from '@/lib/spotify'
 
 export async function GET() {
   const session = await getSession()
-
   if (!session.accessToken) {
     return NextResponse.json({ authenticated: false })
   }
-
-  // Refresh token if needed
   if (await isTokenExpired(session)) {
     try {
       const refreshed = await refreshAccessToken(session.refreshToken!)
@@ -21,14 +17,14 @@ export async function GET() {
       return NextResponse.json({ authenticated: false })
     }
   }
-
-return NextResponse.json({
+  return NextResponse.json({
     authenticated: true,
     userId: session.userId,
     displayName: session.displayName,
     accessToken: session.accessToken,
     roomId: session.userId,
   })
+}
 
 export async function DELETE() {
   const session = await getSession()

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession, isTokenExpired } from '@/lib/session'
-import { searchTracks, getPlaylistTracks, refreshAccessToken } from '@/lib/spotify'
+import { searchTracks, refreshAccessToken } from '@/lib/spotify'
 
 export async function GET(request: NextRequest) {
   const session = await getSession()
@@ -23,13 +23,30 @@ export async function GET(request: NextRequest) {
 
   if (playlistId) {
     try {
-      const data = await getPlaylistTracks(session.accessToken, playlistId)
+      const res = await fetch(
+        `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=50`,
+        { headers: { Authorization: `Bearer ${session.accessToken}` } }
+      )
+      if (!res.ok) {
+        const err = await res.text()
+        console.error('Spotify playlist error:', res.status, err)
+        return NextResponse.json({ error: `Spotify error: ${res.status}` }, { status: 500 })
+      }
+      const data = await res.json()
       const tracks = (data.items ?? [])
         .map((item: any) => item?.track)
         .filter((t: any) => t && t.id && t.uri)
+        .map((t: any) => ({
+          id: t.id,
+          name: t.name,
+          uri: t.uri,
+          duration_ms: t.duration_ms,
+          artists: t.artists,
+          album: t.album,
+        }))
       return NextResponse.json({ tracks })
     } catch (err) {
-      console.error('Playlist error:', err)
+      console.error('Playlist fetch error:', err)
       return NextResponse.json({ error: 'Failed to fetch playlist' }, { status: 500 })
     }
   }

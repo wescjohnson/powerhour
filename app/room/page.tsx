@@ -36,7 +36,7 @@ type RoomPhase = 'waiting' | 'analyzing' | 'playing' | 'between'
 type MobileTab = 'player' | 'queue' | 'add'
 
 export default function RoomPage() {
-  const [user, setUser] = useState<{ displayName: string; accessToken: string } | null>(null)
+  const [user, setUser] = useState<{ displayName: string; accessToken: string; roomId: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [queue, setQueue] = useState<QueuedTrack[]>([])
   const [currentTrack, setCurrentTrack] = useState<QueuedTrack | null>(null)
@@ -48,11 +48,15 @@ export default function RoomPage() {
   const [searching, setSearching] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [mobileTab, setMobileTab] = useState<MobileTab>('player')
+  const [showQR, setShowQR] = useState(false)
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
+  const [guestUrl, setGuestUrl] = useState<string>('')
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const roundStartRef = useRef<number>(0)
   const startNextRoundRef = useRef<(() => Promise<void>) | null>(null)
   const queueRef = useRef<QueuedTrack[]>([])
+  const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const { state: playerState, play, pause, refreshMobileDevice } = useSpotifyPlayer(user?.accessToken ?? null)
 
@@ -63,13 +67,63 @@ export default function RoomPage() {
       .then(r => r.json())
       .then(data => {
         if (data.authenticated) {
-          setUser({ displayName: data.displayName, accessToken: data.accessToken })
+          setUser({ displayName: data.displayName, accessToken: data.accessToken, roomId: data.roomId })
+          const url = `${window.location.origin}/guest?room=${data.roomId}`
+          setGuestUrl(url)
+          generateQR(url)
         } else {
           window.location.href = '/'
         }
         setLoading(false)
       })
   }, [])
+
+  const generateQR = async (url: string) => {
+    try {
+      const QRCode = (await import('qrcode')).default
+      const dataUrl = await QRCode.toDataURL(url, { width: 200, margin: 2, color: { dark: '#ffffff', light: '#0a0a0a' } })
+      setQrDataUrl(dataUrl)
+    } catch {}
+  }
+
+  // Sync state to room API so guests can see it
+  const syncRoomState = useCallback(async (roomId: string, q: QueuedTrack[], ct: QueuedTrack | null, ph: RoomPhase, tl: number) => {
+    try {
+      await fetch(`/api/room/queue?roomId=${roomId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queue: q, currentTrack: ct, phase: ph, timeLeft: tl }),
+      })
+    } catch {}
+  }, [])
+
+  // Poll for guest-added songs every 3 seconds
+  useEffect(() => {
+    if (!user?.roomId) return
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/room/queue?roomId=${user.roomId}`)
+        const data = await res.json()
+        // Merge guest additions into our queue (avoid dupes)
+        if (data.queue && data.queue.length > 0) {
+          setQueue(prev => {
+            const existingIds = new Set(prev.map((t: any) => t.id))
+            const newTracks = data.queue.filter((t: any) => !existingIds.has(t.id))
+            if (newTracks.length === 0) return prev
+            return [...prev, ...newTracks]
+          })
+        }
+      } catch {}
+    }
+    syncIntervalRef.current = setInterval(poll, 3000)
+    return () => { if (syncIntervalRef.current) clearInterval(syncIntervalRef.current) }
+  }, [user?.roomId])
+
+  // Push current state to room API whenever it changes
+  useEffect(() => {
+    if (!user?.roomId) return
+    syncRoomState(user.roomId, queue, currentTrack, phase, timeLeft)
+  }, [queue, currentTrack, phase, timeLeft, user?.roomId, syncRoomState])
 
   const startNextRound = useCallback(async () => {
     let q = queueRef.current
@@ -193,6 +247,27 @@ export default function RoomPage() {
     )
   }
 
+  const QRModal = () => (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
+      onClick={() => setShowQR(false)}>
+      <div style={{ background: '#111', border: '1px solid #333', borderRadius: '16px', padding: '2rem', textAlign: 'center', maxWidth: '280px' }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ color: '#fff', fontSize: '16px', fontWeight: 500, marginBottom: '4px' }}>Invite Guests</div>
+        <div style={{ color: '#666', fontSize: '12px', marginBottom: '1.25rem' }}>Scan to add songs to the queue</div>
+        {qrDataUrl && <img src={qrDataUrl} alt="QR Code" style={{ width: '180px', height: '180px', borderRadius: '8px', marginBottom: '1rem' }} />}
+        <div style={{ color: '#555', fontSize: '11px', wordBreak: 'break-all', marginBottom: '1.25rem' }}>{guestUrl}</div>
+        <button onClick={() => { navigator.clipboard.writeText(guestUrl); }}
+          style={{ background: 'var(--green)', color: '#000', border: 'none', padding: '10px 24px', borderRadius: '20px', fontFamily: 'var(--font-mono)', fontSize: '13px', cursor: 'pointer', marginBottom: '8px', width: '100%' }}>
+          Copy Link
+        </button>
+        <button onClick={() => setShowQR(false)}
+          style={{ background: 'transparent', color: '#666', border: 'none', padding: '8px', fontSize: '13px', cursor: 'pointer', width: '100%' }}>
+          Close
+        </button>
+      </div>
+    </div>
+  )
+
   const SearchPanel = () => (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ padding: '1rem', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
@@ -205,7 +280,7 @@ export default function RoomPage() {
           {searching && <div style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: '11px' }}>...</div>}
         </div>
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' } as any}>
+      <div style={{ flex: 1, overflowY: 'auto' }}>
         {searchResults.length === 0 && (
           <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
             {searchQuery.trim() ? 'No results' : 'Type to search Spotify'}
@@ -232,43 +307,26 @@ export default function RoomPage() {
       <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: '11px', letterSpacing: '0.1em', flexShrink: 0 }}>
         UP NEXT — {queue.length} song{queue.length !== 1 ? 's' : ''}
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' } as any}>
+      <div style={{ flex: 1, overflowY: 'auto' }}>
         {queue.length === 0 && (
-          <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>No songs in queue — tap Add to search</div>
+          <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>No songs in queue</div>
         )}
         {queue.map((track, i) => (
           <div key={`${track.id}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
             <span style={{ color: 'var(--text-muted)', fontSize: '11px', width: '16px', flexShrink: 0 }}>{i + 1}</span>
             <img src={track.album.images[2]?.url || track.album.images[0]?.url} alt=""
-              style={{ width: '44px', height: '44px', borderRadius: '4px', flexShrink: 0 }} />
+              style={{ width: '40px', height: '40px', borderRadius: '4px', flexShrink: 0 }} />
             <div style={{ overflow: 'hidden', minWidth: 0, flex: 1 }}>
               <div style={{ color: 'var(--text)', fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.name}</div>
               <div style={{ color: 'var(--text-muted)', fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artists.map((a: any) => a.name).join(', ')}</div>
             </div>
             <button onClick={() => setQueue(prev => prev.filter((_, idx) => idx !== i))}
-              style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '22px', flexShrink: 0, padding: '0 4px' }}>×</button>
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '20px', flexShrink: 0, padding: '0 4px' }}>×</button>
           </div>
         ))}
       </div>
     </div>
   )
-
-  const tabStyle = (tab: MobileTab) => ({
-    flex: 1,
-    display: 'flex' as const,
-    flexDirection: 'column' as const,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-    gap: '3px',
-    padding: '10px 0 calc(10px + env(safe-area-inset-bottom))',
-    background: 'transparent',
-    border: 'none',
-    cursor: 'pointer',
-    color: mobileTab === tab ? 'var(--green)' : 'var(--text-muted)',
-    fontSize: '10px',
-    fontFamily: 'var(--font-mono)',
-    letterSpacing: '0.05em',
-  })
 
   const MobileDeviceStatus = () => {
     if (playerState.isReady) return (
@@ -295,6 +353,23 @@ export default function RoomPage() {
     )
   }
 
+  const tabStyle = (tab: MobileTab) => ({
+    flex: 1,
+    display: 'flex' as const,
+    flexDirection: 'column' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: '3px',
+    padding: '10px 0 calc(10px + env(safe-area-inset-bottom))',
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    color: mobileTab === tab ? 'var(--green)' : 'var(--text-muted)',
+    fontSize: '10px',
+    fontFamily: 'var(--font-mono)',
+    letterSpacing: '0.05em',
+  })
+
   return (
     <>
       <style>{`
@@ -305,32 +380,15 @@ export default function RoomPage() {
         .ph-mobile-wrap { display: none; }
         @media (max-width: 768px) {
           .ph-layout { display: none; }
-          .ph-mobile-wrap {
-            display: flex;
-            flex-direction: column;
-            flex: 1;
-            overflow: hidden;
-            min-height: 0;
-          }
-          .ph-mobile-body {
-            flex: 1;
-            overflow: hidden;
-            min-height: 0;
-            display: flex;
-            flex-direction: column;
-          }
-          .ph-tab-bar {
-            flex-shrink: 0;
-            display: flex;
-            border-top: 1px solid var(--border);
-            background: var(--dark);
-          }
+          .ph-mobile-wrap { display: flex; flex-direction: column; flex: 1; overflow: hidden; min-height: 0; }
+          .ph-mobile-body { flex: 1; overflow: hidden; min-height: 0; display: flex; flex-direction: column; }
+          .ph-tab-bar { flex-shrink: 0; display: flex; border-top: 1px solid var(--border); background: var(--dark); }
         }
       `}</style>
 
-      <div className="ph-root">
+      {showQR && <QRModal />}
 
-        {/* Header */}
+      <div className="ph-root">
         <header style={{ borderBottom: '1px solid var(--border)', padding: '0.875rem 1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <span style={{ fontSize: '18px' }}>🍺</span>
@@ -345,6 +403,11 @@ export default function RoomPage() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Round <span style={{ color: 'var(--green)' }}>{roundNumber}</span></span>
+            <button onClick={() => setShowQR(true)}
+              style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', padding: '5px 12px', borderRadius: '20px', fontFamily: 'var(--font-mono)', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+              Invite
+            </button>
             <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{user?.displayName}</span>
           </div>
         </header>
@@ -369,7 +432,7 @@ export default function RoomPage() {
               <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
                 <div style={{ fontSize: '48px', marginBottom: '1rem' }}>🎵</div>
                 <div style={{ fontSize: '14px', marginBottom: '0.5rem' }}>Queue is empty</div>
-                <div style={{ fontSize: '12px' }}>Add songs to get started</div>
+                <div style={{ fontSize: '12px' }}>Add songs or share the invite link</div>
               </div>
             )}
             {phase === 'waiting' && queue.length > 0 && (
@@ -418,7 +481,7 @@ export default function RoomPage() {
                 UP NEXT — {queue.length} song{queue.length !== 1 ? 's' : ''}
               </div>
               {queue.length === 0 && (
-                <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>Search for songs to add to the queue</div>
+                <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>Search for songs or share the invite link</div>
               )}
               {queue.map((track, i) => (
                 <div key={`${track.id}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 16px', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
@@ -453,16 +516,14 @@ export default function RoomPage() {
                     <div style={{ fontFamily: 'var(--font-display)', fontSize: '20px', color: '#fff', marginBottom: '4px' }}>{currentTrack.name}</div>
                     <div style={{ color: 'var(--text-mid)', fontSize: '13px', marginBottom: '1rem' }}>{currentTrack.artists.map((a: any) => a.name).join(', ')}</div>
                     {phase === 'playing' && (
-                      <button onClick={skipSong} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', padding: '10px 24px', borderRadius: '20px', fontFamily: 'var(--font-mono)', fontSize: '13px', cursor: 'pointer' }}>
-                        Skip →
-                      </button>
+                      <button onClick={skipSong} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', padding: '10px 24px', borderRadius: '20px', fontFamily: 'var(--font-mono)', fontSize: '13px', cursor: 'pointer' }}>Skip →</button>
                     )}
                   </div>
                 ) : (
                   <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
                     <div style={{ fontSize: '36px', marginBottom: '0.5rem' }}>🎵</div>
                     <div style={{ fontSize: '14px', marginBottom: '4px' }}>Queue is empty</div>
-                    <div style={{ fontSize: '12px' }}>Tap Add to search for songs</div>
+                    <div style={{ fontSize: '12px' }}>Tap Add or share the invite</div>
                   </div>
                 )}
                 {phase === 'waiting' && queue.length > 0 && playerState.isReady && (
@@ -476,7 +537,6 @@ export default function RoomPage() {
             {mobileTab === 'queue' && <QueuePanel />}
             {mobileTab === 'add' && <SearchPanel />}
           </div>
-
           <div className="ph-tab-bar">
             <button style={tabStyle('player')} onClick={() => setMobileTab('player')}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -499,8 +559,16 @@ export default function RoomPage() {
             </button>
           </div>
         </div>
-
       </div>
     </>
   )
 }
+```
+
+---
+
+Then you need two more things:
+
+**1. Install the QR code package** — add this to `package.json` dependencies:
+```
+"qrcode": "^1.5.3"
